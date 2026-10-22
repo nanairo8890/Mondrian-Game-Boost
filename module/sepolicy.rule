@@ -1,0 +1,2 @@
+allow hal_power_default sysfs_thermal dir search
+allow hal_power_default sysfs_thermal file { open write getattr }

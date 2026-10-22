@@ -1,0 +1,1027 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#08121b">
+<title>Game Boost</title>
+<!-- The manager serves this: --window-inset-* follow the system bars, and asking for it turns
+     edge-to-edge on (KsuWebUI and normal browsers just get a 404) -->
+<link rel="stylesheet" href="/internal/insets.css">
+<style>
+/* A dark instrument panel over an Aero sky. Everything here is static: the WebView draws on the
+   app's own threads, so blur, filters and endless animations make the manager stop responding.
+   The page only repaints what changes, once per sample. */
+:root{
+  --font:"Segoe UI",Roboto,"Noto Sans",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"Roboto Mono","Noto Sans Mono",monospace;
+  --text:#e8ecef;
+  --text-2:#aab3bb;
+  --text-3:#87919a;
+  --accent:#4dbde8;
+  --accent-lo:#2f9fcf;
+  --amber:#dfa443;
+  --red:#e0605a;
+  --line-2:#d3dae0;
+  --line-3:#7d8993;
+  --recess:#07080a;
+  --hair:rgba(255,255,255,.07);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;min-height:100vh;background:#08121b;color:var(--text);font:13px/1.4 var(--font);
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+h1,h2,p,figure,dl,dd,ul{margin:0}
+b{font-weight:600}
+button{font:inherit}
+[hidden]{display:none!important}
+
+/* Wallpaper: dark sky to light horizon, soft aurora streaks */
+.wall{position:fixed;top:0;right:0;bottom:0;left:0;z-index:0;overflow:hidden;pointer-events:none;
+  background:
+    radial-gradient(90% 55% at 88% 6%,rgba(44,110,148,.40),rgba(44,110,148,0) 70%),
+    linear-gradient(180deg,#050b12 0%,#091a27 24%,#103147 48%,#215f7a 70%,#5b9db6 86%,#a8d2e0 100%)}
+.wall::before,.wall::after,.wall i{content:"";position:absolute;left:-40%;width:180%}
+.wall::before{top:34%;height:34%;transform:rotate(-13deg);
+  background:radial-gradient(50% 50% at 50% 50%,rgba(156,216,240,.18),rgba(156,216,240,0) 72%)}
+.wall::after{top:14%;height:22%;transform:rotate(-23deg);
+  background:radial-gradient(50% 50% at 50% 50%,rgba(108,178,224,.15),rgba(108,178,224,0) 72%)}
+.wall i{top:53%;height:5%;transform:rotate(-16deg);
+  background:radial-gradient(50% 50% at 50% 50%,rgba(222,245,255,.20),rgba(222,245,255,0) 75%)}
+
+.defs{position:absolute;width:0;height:0;overflow:hidden}
+
+.page{position:relative;z-index:1;max-width:560px;margin:0 auto;
+  padding:calc(16px + var(--window-inset-top, 0px)) 12px calc(20px + var(--window-inset-bottom, 0px))}
+
+/* Window */
+.window{display:block;border-radius:6px;overflow:hidden;border:1px solid #000;
+  box-shadow:0 0 0 1px rgba(255,255,255,.10),0 24px 48px -16px rgba(0,0,0,.75),0 4px 12px rgba(0,0,0,.35)}
+
+/* Faceplate: name on the left, the state in a recessed readout on the right */
+.plate{position:relative;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px;padding:10px 12px;
+  background:linear-gradient(180deg,#3d444b 0%,#30363c 48%,#2a2f34 52%,#272b30 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),inset 0 -1px 0 rgba(0,0,0,.6)}
+.plate::after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none;
+  background:linear-gradient(112deg,rgba(255,255,255,0) 30%,rgba(255,255,255,.05) 42%,rgba(255,255,255,0) 56%)}
+.brand{min-width:0}
+.app-name{font-size:16px;font-weight:600;line-height:1.2;letter-spacing:.01em;color:#f3f6f8}
+.app-sub{margin-top:1px;font-size:11.5px;line-height:1.3;color:rgba(226,234,239,.66)}
+.app-name .demo{margin-left:8px;padding:0 5px;border:1px solid rgba(223,164,67,.6);border-radius:2px;color:var(--amber);
+  font-size:10.5px;font-weight:400;letter-spacing:0;vertical-align:2px}
+.readout{position:relative;z-index:1;display:flex;align-items:center;gap:8px;flex:none;max-width:56%;min-height:32px;padding:5px 10px;
+  border-radius:2px;background:var(--recess);border:1px solid #000;font-size:12.5px;font-weight:600;line-height:1.25;
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.08)}
+
+.client{padding:0 12px 12px;
+  background:
+    repeating-linear-gradient(0deg,rgba(255,255,255,.013) 0 1px,rgba(255,255,255,0) 1px 3px),
+    repeating-linear-gradient(0deg,rgba(0,0,0,.03) 0 1px,rgba(0,0,0,0) 1px 7px),
+    linear-gradient(180deg,#2a2e32 0,#25282c 240px,#212427 100%)}
+.state-note{padding:10px 0;border-bottom:1px solid rgba(0,0,0,.5);box-shadow:0 1px 0 rgba(255,255,255,.05);
+  font-size:12.5px;color:var(--text-2)}
+
+/* Lamps: green means on, amber a limit or a warning, red an error */
+.lamp{display:inline-block;flex:none;width:10px;height:10px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#4b5157,#23272b 70%);
+  box-shadow:0 0 0 1px #0a0b0c,0 1px 0 1px rgba(255,255,255,.06)}
+.lamp.on{background:radial-gradient(circle at 35% 30%,#d4f6d2 0,#7fda80 26%,#3fa94a 68%,#2a7a33 100%)}
+.lamp.warn{background:radial-gradient(circle at 35% 30%,#fbe7c2 0,#efbe62 26%,#c98a26 68%,#8f5f15 100%)}
+.lamp.bad{background:radial-gradient(circle at 35% 30%,#fbd0cd 0,#ee7f78 26%,#c4433d 68%,#8c2a26 100%)}
+.lamp.sm{width:8px;height:8px}
+
+/* Instruments */
+.instruments{padding:16px 0 4px}
+.dials{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.dial{text-align:center}
+.dial figcaption{margin-top:6px;font-size:12px;color:var(--text-2)}
+.gauge{display:block;width:100%;max-width:200px;height:auto;margin:0 auto;overflow:visible}
+.gauge text{font-family:var(--font)}
+.gauge .gn{font-size:11px;fill:#adb5bc;text-anchor:middle}
+.gauge .gro{font-size:16px;font-weight:600;fill:#eaeef1;text-anchor:middle;font-variant-numeric:tabular-nums}
+.gauge .gu{font-size:10px;fill:#7f8992;text-anchor:middle}
+.gauge .trk{fill:none;stroke:#2a3036;stroke-width:3.2}
+.gauge .acc{fill:none;stroke:var(--accent);stroke-width:3.2}
+.gauge .amb{fill:none;stroke:var(--amber);stroke-width:1.8}
+.gauge .amb-f{fill:var(--amber);stroke:#0f1113;stroke-width:.8;stroke-linejoin:round}
+
+/* Processor and GPU, under the gauges */
+.hw{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:10px;row-gap:2px;margin:14px 0 0;padding:8px 10px;
+  border:1px solid rgba(0,0,0,.6);border-radius:3px;background:rgba(0,0,0,.18);box-shadow:0 1px 0 rgba(255,255,255,.05);font-size:12px;line-height:1.45}
+.hw dt{color:var(--text-3);white-space:nowrap}
+.hw dd{color:var(--text);overflow-wrap:anywhere}
+.hw dd span{color:var(--text-3)}
+
+.readouts{width:100%;margin-top:10px;border-collapse:collapse;font-size:12px}
+.readouts th{padding:5px 0;font-weight:400;color:var(--text-2);text-align:left;vertical-align:middle}
+.readouts td{padding:5px 0 5px 10px;white-space:nowrap;vertical-align:middle}
+.readouts tr+tr th,.readouts tr+tr td{border-top:1px solid var(--hair)}
+.k{display:inline-block;width:12px;height:10px;margin-right:6px;vertical-align:-1px}
+.k-acc{color:var(--accent)}
+.k-amb{color:var(--amber)}
+.n{display:inline-block;min-width:4ch;text-align:right;font-size:13px;font-weight:600;color:#eaeef1;font-variant-numeric:tabular-nums}
+.n.n2{min-width:2ch}
+.n.dim{color:var(--text-3);font-weight:400}
+.n.hot{color:var(--amber)}
+.u{margin-left:3px;font-size:11.5px;color:var(--text-3)}
+.m{margin-left:6px;font-size:11.5px;color:var(--text-3);font-variant-numeric:tabular-nums}
+
+/* Front panel lamps: a lamp, its printed label and the value under it */
+.panel{list-style:none;margin:12px 0 0;padding:12px 0 2px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));column-gap:8px;
+  border-top:1px solid rgba(0,0,0,.5);box-shadow:inset 0 1px 0 rgba(255,255,255,.04);text-align:center}
+.panel li{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:0}
+.panel .lamp{width:9px;height:9px}
+.panel .pl{font-size:11px;line-height:1.25;color:var(--text-3)}
+.panel .pv{font-size:12px;line-height:1.3;color:var(--text);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+
+/* Group boxes */
+.group{margin:14px 0 0;padding:4px 12px 10px;min-width:0;border:1px solid rgba(255,255,255,.11);border-radius:4px}
+.group>legend{padding:0 6px;margin-left:-2px;font-size:12px;font-weight:600;color:#c7ced4}
+
+.ctl{padding:8px 0 9px}
+.ctl+.ctl{border-top:1px solid rgba(255,255,255,.05)}
+.ctl-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-right:96px;font-size:12.5px;line-height:1.3}
+.rom{font-size:11px;color:var(--text-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.ctl-row,.ctl-flat{display:grid;grid-template-columns:minmax(0,1fr) 84px;column-gap:12px;align-items:center}
+.ctl-row{margin-top:4px}
+.ctl-flat{font-size:12.5px}
+
+.slider{position:relative;height:28px}
+.slider::after{content:"";position:absolute;left:5px;right:5px;bottom:0;height:3px;
+  background:repeating-linear-gradient(90deg,rgba(255,255,255,.15) 0 1px,rgba(255,255,255,0) 1px 10%);
+  border-right:1px solid rgba(255,255,255,.15)}
+.trk-s{position:absolute;left:0;right:0;top:11px;height:4px;border-radius:2px;background:var(--recess);
+  box-shadow:inset 0 1px 1px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.07)}
+.fil{position:absolute;left:0;top:11px;height:4px;border-radius:2px 0 0 2px;
+  width:calc(var(--v) * (100% - 10px) + 5px);background:linear-gradient(180deg,#7ad1f1,var(--accent-lo))}
+.romk{position:absolute;top:7px;width:2px;height:12px;border-radius:1px;
+  left:calc(var(--r) * (100% - 10px) + 4px);background:#e8ecef;box-shadow:0 0 0 1px rgba(0,0,0,.55)}
+.thm{position:absolute;top:4px;width:10px;height:18px;border-radius:2px;left:calc(var(--v) * (100% - 10px));
+  background:linear-gradient(180deg,#f1f3f5,#bcc3c9 55%,#8e969d);border:1px solid #111315;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85),0 1px 2px rgba(0,0,0,.55)}
+.thm::after{content:"";position:absolute;left:3.5px;top:4px;bottom:4px;width:1px;background:rgba(0,0,0,.25)}
+
+.vbox{display:flex;align-items:baseline;justify-content:flex-end;gap:4px;height:28px;padding:0 6px 0 8px;
+  border-radius:2px;background:var(--recess);border:1px solid #000;line-height:26px;white-space:nowrap;overflow:hidden;
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.7),0 1px 0 rgba(255,255,255,.07);font-variant-numeric:tabular-nums}
+.vbox b{font-size:14px;color:#e9eef1}
+.vbox i{width:26px;font-style:normal;font-size:11px;color:var(--text-3)}
+
+.note{margin-top:4px;padding-top:10px;border-top:1px solid rgba(255,255,255,.05);font-size:12px;line-height:1.45;color:var(--text-2)}
+
+/* Profile keys */
+.keys{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding-top:6px}
+.kgrp{display:flex;gap:4px}
+.kcell{display:flex;flex-direction:column;align-items:center;gap:6px;width:66px}
+.kcap{max-width:100%;font-size:11px;line-height:1.2;color:var(--text-2);text-align:center}
+.kcell.sel .kcap{color:var(--text)}
+.kcell.off .kcap{color:var(--text-3)}
+.key{position:relative;display:grid;place-items:center;width:40px;height:40px;padding:0;margin:0;cursor:pointer;
+  -webkit-appearance:none;appearance:none;border:1px solid #0b0c0e;border-radius:3px;color:#e3e8ec;
+  font:600 15px/1 var(--font);
+  background:linear-gradient(180deg,#42474d,#2e3237 58%,#282b2f);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 1px 2px rgba(0,0,0,.45)}
+.key:active{background:linear-gradient(180deg,#25282c,#2c3034)}
+.key[aria-checked="true"]{color:var(--accent);background:linear-gradient(180deg,#1a1d20,#24272b);
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.07)}
+.key[aria-checked="true"]::after{content:"";position:absolute;left:11px;right:11px;bottom:5px;height:2px;border-radius:1px;background:var(--accent)}
+.key:disabled{cursor:default;color:#677079;background:linear-gradient(180deg,#34383d,#2b2e32);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+.key svg{width:18px;height:18px}
+.pdesc{margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.05)}
+.pmeta{font-size:11px;color:var(--text-3)}
+.pdesc p{margin-top:3px;font-size:12.5px;line-height:1.45;color:var(--text-2)}
+.pdesc p b{color:var(--text)}
+.pending{display:flex;align-items:center;gap:12px;margin-top:10px;padding:8px 10px;border:1px solid rgba(223,164,67,.45);border-radius:3px;
+  background:rgba(223,164,67,.07)}
+.pending p{flex:1;font-size:12px;line-height:1.4;color:#ead2a6}
+
+/* Text buttons (dialog, restart) */
+.btn{min-width:84px;height:34px;padding:0 14px;cursor:pointer;border:1px solid #0b0c0e;border-radius:3px;color:#e3e8ec;font-size:12.5px;font-weight:600;
+  background:linear-gradient(180deg,#42474d,#2e3237 58%,#282b2f);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 1px 2px rgba(0,0,0,.45)}
+.btn:active{background:linear-gradient(180deg,#25282c,#2c3034)}
+.btn.pri{color:#06202c;border-color:#0d3a4d;background:linear-gradient(180deg,#8fd8f4,#4dbde8 58%,#36a8d6);box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 1px 2px rgba(0,0,0,.45)}
+.btn.warn{color:#2c1a02;border-color:#4d3205;background:linear-gradient(180deg,#f3cf8a,#dfa443 58%,#c98f30);box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 1px 2px rgba(0,0,0,.45)}
+
+/* Hardware monitor */
+.monitor{margin-top:14px;overflow:hidden;border:1px solid #000;border-radius:4px;background:#141618;box-shadow:0 1px 0 rgba(255,255,255,.06)}
+.mon-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px;padding:6px 10px;
+  border-bottom:1px solid #000;background:linear-gradient(180deg,#30353a,#25282c);box-shadow:inset 0 1px 0 rgba(255,255,255,.10)}
+.mon-bar h2{font-size:13px;font-weight:600}
+.mon-key{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-2);white-space:nowrap}
+.band-key{width:12px;height:10px;background:rgba(95,200,105,.16);border-left:1px solid rgba(95,200,105,.6)}
+.graphs{padding:2px 10px 8px}
+.graph{padding-top:10px}
+.g-head{display:flex;justify-content:space-between;align-items:flex-end;gap:8px;margin:0 0 5px 30px}
+.g-title{font-size:12px;line-height:1.3}
+.g-sub{min-height:15px;font-size:11px;line-height:1.35;color:var(--text-3);font-variant-numeric:tabular-nums}
+.g-now{font-size:16px;font-weight:600;line-height:1.1;color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap}
+.g-now small{margin-left:4px;font-size:11px;font-weight:400;color:var(--text-3)}
+.g-leg{display:flex;flex-wrap:wrap;column-gap:12px;min-height:15px;font-size:11px;line-height:1.35;color:var(--text-3);font-variant-numeric:tabular-nums}
+.g-leg b{color:var(--text)}
+.sw{display:inline-block;width:10px;height:2px;margin-right:4px;vertical-align:middle;background:currentColor}
+.c1{color:var(--accent)}
+.c2{color:var(--line-2)}
+.c3{color:var(--line-3)}
+.g-body{display:grid;grid-template-columns:30px minmax(0,1fr)}
+.g-axis{position:relative;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;
+  padding-right:6px;font-size:10px;line-height:1;color:var(--text-3);font-variant-numeric:tabular-nums}
+.g-axis .lim-l{position:absolute;right:6px;transform:translateY(-50%);color:var(--amber)}
+.plot{position:relative;height:58px;overflow:hidden;border:1px solid #000;border-radius:2px;
+  background-color:#040506;
+  background-image:linear-gradient(90deg,rgba(255,255,255,.06) 1px,rgba(255,255,255,0) 1px),
+                   linear-gradient(180deg,rgba(255,255,255,.06) 1px,rgba(255,255,255,0) 1px);
+  background-size:12.5% 100%,100% 25%;
+  box-shadow:0 1px 0 rgba(255,255,255,.05)}
+.plot svg{position:absolute;top:0;left:0;width:100%;height:100%}
+.plot path{fill:none;stroke-width:1.3;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.plot .ln{stroke:var(--accent)}
+.plot .ln-2{stroke:var(--line-2)}
+.plot .ln-3{stroke:var(--line-3)}
+.plot .bands{fill:rgba(95,200,105,.075);stroke:none}
+.plot .edges{stroke:rgba(95,200,105,.42);stroke-width:1}
+.lim{position:absolute;left:0;right:0;height:0;border-top:1px dashed rgba(223,164,67,.75)}
+.t-axis{position:relative;height:14px;margin:5px 0 0 30px;font-size:10px;line-height:14px;color:var(--text-3)}
+.t-axis span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
+.t-axis span:first-child{transform:none}
+.t-axis span:last-child{transform:translateX(-100%)}
+
+/* Collapsed rows */
+.xps{margin-top:14px}
+.xp{border-top:1px solid rgba(0,0,0,.5);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.xp summary{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 2px;font-size:13px;cursor:pointer;list-style:none}
+.xp summary::-webkit-details-marker{display:none}
+.xp summary::marker{content:""}
+.chev{flex:none;width:12px;height:12px;color:var(--text-3)}
+.xp[open] .chev{transform:rotate(90deg)}
+.xp-body{padding:0 2px 12px 22px;font-size:12.5px;line-height:1.45;color:var(--text-2)}
+.xp-body ul{padding-left:16px}
+.xp-body li+li{margin-top:6px}
+.xp-body li b{color:var(--text)}
+.xp-body li.alert{color:#ead2a6}
+.log{margin:0;padding:8px 10px;border:1px solid #000;border-radius:2px;background:var(--recess);
+  font:10.5px/1.6 var(--mono);color:#b9c2c9;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow-y:auto}
+
+/* Details pane (window bottom) */
+.details{padding:10px 12px 12px;border-top:1px solid #000;
+  background:linear-gradient(180deg,#1e2124,#191b1e);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+.details dl{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:10px;row-gap:4px;font-size:12px;line-height:1.4}
+.details dt{color:var(--text-3);text-align:right;white-space:nowrap}
+.details dd{display:flex;align-items:center;gap:6px;color:var(--text);font-variant-numeric:tabular-nums}
+
+.credits{margin:14px 4px 0;font-size:11px;line-height:1.5;text-align:center;color:rgba(10,28,40,.82)}
+
+/* Dialog and toast */
+.veil{position:fixed;top:0;right:0;bottom:0;left:0;z-index:10;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(2,8,14,.62)}
+.dlg{width:100%;max-width:360px;overflow:hidden;border:1px solid #000;border-radius:5px;
+  box-shadow:0 0 0 1px rgba(255,255,255,.10),0 18px 40px rgba(0,0,0,.7)}
+.dlg-bar{padding:10px 12px;font-size:13.5px;font-weight:600;color:#f3f6f8;
+  background:linear-gradient(180deg,#3d444b 0%,#30363c 48%,#2a2f34 52%,#272b30 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),inset 0 -1px 0 rgba(0,0,0,.6)}
+.dlg-body{padding:14px 12px 12px;background:linear-gradient(180deg,#2a2e32,#232629)}
+.dlg-body p{font-size:12.5px;line-height:1.5;color:var(--text-2)}
+.dlg-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.toast{position:fixed;z-index:20;left:50%;bottom:calc(28px + var(--window-inset-bottom, 0px));transform:translateX(-50%);
+  width:max-content;max-width:calc(100% - 32px);padding:8px 12px;border:1px solid #000;border-radius:3px;
+  background:#2a2e32;color:var(--text);font-size:12.5px;box-shadow:0 0 0 1px rgba(255,255,255,.08),0 6px 16px rgba(0,0,0,.5)}
+</style>
+</head>
+<body>
+<div class="wall" aria-hidden="true"><i></i></div>
+
+<svg class="defs" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="g-bz1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c4cbd1"/>
+      <stop offset=".34" stop-color="#7b838a"/>
+      <stop offset=".7" stop-color="#3a3f45"/>
+      <stop offset="1" stop-color="#202428"/>
+    </linearGradient>
+    <linearGradient id="g-bz2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#121417"/>
+      <stop offset=".6" stop-color="#2d3237"/>
+      <stop offset="1" stop-color="#6c747b"/>
+    </linearGradient>
+    <radialGradient id="g-face" cx=".5" cy=".4" r=".62">
+      <stop offset="0" stop-color="#1f2327"/>
+      <stop offset="1" stop-color="#0c0e10"/>
+    </radialGradient>
+    <linearGradient id="g-glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".09"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="g-hub" cx=".38" cy=".32" r=".8">
+      <stop offset="0" stop-color="#eef1f3"/>
+      <stop offset=".5" stop-color="#949ca3"/>
+      <stop offset="1" stop-color="#393e43"/>
+    </radialGradient>
+    <symbol id="k-needle" viewBox="0 0 12 10">
+      <path d="M2.5 8 10.8 1.6" fill="none" stroke="#eef1f3" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="2.6" cy="7.9" r="1.9" fill="#9aa2a9" stroke="#0b0c0d" stroke-width=".5"/>
+    </symbol>
+    <symbol id="k-arc" viewBox="0 0 12 10">
+      <path d="M1.6 9.4A7.4 7.4 0 0 1 9 2" fill="none" stroke="currentColor" stroke-width="2.4"/>
+    </symbol>
+    <symbol id="k-cap" viewBox="0 0 12 10">
+      <path d="M2.6 1.8h6.8L6 8.2Z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="k-lim" viewBox="0 0 12 10">
+      <path d="M6 .5v9" stroke="currentColor" stroke-width="1.8"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="page">
+<main class="window">
+
+  <header class="plate">
+    <div class="brand">
+      <h1 class="app-name">Game Boost<span class="demo" id="demo" hidden></span></h1>
+      <div class="app-sub">Mondrian-Game-Boost <span id="ver">v1.0</span> · POCO F5 Pro</div>
+    </div>
+    <div class="readout" role="status"><span class="lamp" id="stLamp"></span><span id="stTitle">…</span></div>
+  </header>
+
+  <div class="client">
+
+    <p class="state-note" id="stText" hidden></p>
+
+    <section class="instruments">
+      <div class="dials">
+        <figure class="dial"><svg class="gauge" id="gC" viewBox="0 0 200 200" role="img"><circle cx="100" cy="102.5" r="96" fill="#000" opacity=".45"/><circle cx="100" cy="100" r="96" fill="url(#g-bz1)"/><circle cx="100" cy="100" r="94.6" fill="none" stroke="#fff" stroke-opacity=".07" stroke-width=".5"/><circle cx="100" cy="100" r="93.3" fill="none" stroke="#000" stroke-opacity=".18" stroke-width=".5"/><circle cx="100" cy="100" r="92.2" fill="url(#g-bz2)"/><circle cx="100" cy="100" r="88.9" fill="#050607"/><circle cx="100" cy="100" r="88" fill="url(#g-face)"/><path d="M27.76 39.39A94.3 94.3 0 0 1 172.24 39.39" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width=".9" stroke-linecap="round"/><path d="M29.85 140.5A81 81 0 1 1 170.15 140.5" fill="none" stroke="#4b535a" stroke-width=".6"/><path d="M28.4 129.66L25.17 131M25.14 120.06L21.76 120.96M23.16 110.12L19.69 110.57M23.16 89.88L19.69 89.43M25.14 79.94L21.76 79.04M28.4 70.34L25.17 69M38.52 52.82L35.74 50.69M45.2 45.2L42.72 42.72M52.82 38.52L50.69 35.74M70.34 28.4L69 25.17M79.94 25.14L79.04 21.76M89.88 23.16L89.43 19.69M110.12 23.16L110.57 19.69M120.06 25.14L120.96 21.76M129.66 28.4L131 25.17M147.18 38.52L149.31 35.74M154.8 45.2L157.28 42.72M161.48 52.82L164.26 50.69M171.6 70.34L174.83 69M174.86 79.94L178.24 79.04M176.84 89.88L180.31 89.43M176.84 110.12L180.31 110.57M174.86 120.06L178.24 120.96M171.6 129.66L174.83 131" stroke="#646d75" stroke-width=".7"/><path d="M25.5 100L19 100M62.75 35.48L59.5 29.85M137.25 35.48L140.5 29.85M174.5 100L181 100" stroke="#a9b1b8" stroke-width="1.1"/><path d="M39.38 135L29.85 140.5M39.38 65L29.85 59.5M100 30L100 19M160.62 65L170.15 59.5M160.62 135L170.15 140.5" stroke="#e2e6e9" stroke-width="1.5"/><text class="gn" x="51.5" y="128" dy=".36em">0</text><text class="gn" x="51.5" y="72" dy=".36em">800</text><text class="gn" x="100" y="44" dy=".36em">1600</text><text class="gn" x="148.5" y="72" dy=".36em">2400</text><text class="gn" x="148.5" y="128" dy=".36em">3200</text><path class="trk" id="cTrk" d=""/><path class="acc" id="cArc" d=""/><path id="cGmax" d="" stroke="#6b747c" stroke-width=".8"/><path class="amb-f" id="cCap" d="" visibility="hidden"/><rect x="72" y="117" width="56" height="22" rx="2" fill="#060708" stroke="#000" stroke-width=".8"/><path d="M73.5 139.7H126.5" stroke="#fff" stroke-opacity=".11" stroke-width=".8"/><text class="gro" id="cVal" x="100" y="128" dy=".36em">–</text><text class="gu" x="100" y="154" dy=".36em">MHz</text><polygon id="cNs" points="100,21 101.6,100 101.2,114 98.8,114 98.4,100" fill="#000" opacity=".45" transform="translate(1.2 2.4) rotate(-120 100 100)"/><polygon id="cN" points="100,21 101.6,100 101.2,114 98.8,114 98.4,100" fill="#eef1f3" transform="rotate(-120 100 100)"/><circle cx="100" cy="100" r="6.5" fill="url(#g-hub)" stroke="#0a0b0c" stroke-width=".7"/><circle cx="100" cy="100" r="2.1" fill="#1f2326"/><path d="M20 96A80 80 0 0 1 180 96Q100 72 20 96Z" fill="url(#g-glass)"/></svg><figcaption data-t="dialClock"></figcaption></figure>
+        <figure class="dial"><svg class="gauge" id="gT" viewBox="0 0 200 200" role="img"><circle cx="100" cy="102.5" r="96" fill="#000" opacity=".45"/><circle cx="100" cy="100" r="96" fill="url(#g-bz1)"/><circle cx="100" cy="100" r="94.6" fill="none" stroke="#fff" stroke-opacity=".07" stroke-width=".5"/><circle cx="100" cy="100" r="93.3" fill="none" stroke="#000" stroke-opacity=".18" stroke-width=".5"/><circle cx="100" cy="100" r="92.2" fill="url(#g-bz2)"/><circle cx="100" cy="100" r="88.9" fill="#050607"/><circle cx="100" cy="100" r="88" fill="url(#g-face)"/><path d="M27.76 39.39A94.3 94.3 0 0 1 172.24 39.39" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width=".9" stroke-linecap="round"/><path d="M29.85 140.5A81 81 0 1 1 170.15 140.5" fill="none" stroke="#4b535a" stroke-width=".6"/><path d="M29.2 131.52L26 132.95M26.29 123.95L22.96 125.03M24.19 116.11L20.77 116.84M22.92 108.1L19.44 108.47M22.92 91.9L19.44 91.53M24.19 83.89L20.77 83.16M26.29 76.05L22.96 74.97M29.2 68.48L26 67.05M37.3 54.45L34.47 52.39M42.41 48.14L39.81 45.8M48.14 42.41L45.8 39.81M54.45 37.3L52.39 34.47M68.48 29.2L67.05 26M76.05 26.29L74.97 22.96M83.89 24.19L83.16 20.77M91.9 22.92L91.53 19.44M108.1 22.92L108.47 19.44M116.11 24.19L116.84 20.77M123.95 26.29L125.03 22.96M131.52 29.2L132.95 26M145.55 37.3L147.61 34.47M151.86 42.41L154.2 39.81M157.59 48.14L160.19 45.8M162.7 54.45L165.53 52.39M170.8 68.48L174 67.05M173.71 76.05L177.04 74.97M175.81 83.89L179.23 83.16M177.08 91.9L180.56 91.53M177.08 108.1L180.56 108.47M175.81 116.11L179.23 116.84M173.71 123.95L177.04 125.03M170.8 131.52L174 132.95" stroke="#646d75" stroke-width=".7"/><path d="M25.5 100L19 100M62.75 35.48L59.5 29.85M137.25 35.48L140.5 29.85M174.5 100L181 100" stroke="#a9b1b8" stroke-width="1.1"/><path d="M39.38 135L29.85 140.5M39.38 65L29.85 59.5M100 30L100 19M160.62 65L170.15 59.5M160.62 135L170.15 140.5" stroke="#e2e6e9" stroke-width="1.5"/><text class="gn" x="51.5" y="128" dy=".36em">20</text><text class="gn" x="51.5" y="72" dy=".36em">40</text><text class="gn" x="100" y="44" dy=".36em">60</text><text class="gn" x="148.5" y="72" dy=".36em">80</text><text class="gn" x="148.5" y="128" dy=".36em">100</text><path class="trk" d="M65.36 120A40 40 0 1 1 134.64 120"/><path class="acc" id="tArc" d=""/><path class="amb" id="tLim" d="" visibility="hidden"/><rect x="72" y="117" width="56" height="22" rx="2" fill="#060708" stroke="#000" stroke-width=".8"/><path d="M73.5 139.7H126.5" stroke="#fff" stroke-opacity=".11" stroke-width=".8"/><text class="gro" id="tVal" x="100" y="128" dy=".36em">–</text><text class="gu" x="100" y="154" dy=".36em">°C</text><polygon id="tNs" points="100,21 101.6,100 101.2,114 98.8,114 98.4,100" fill="#000" opacity=".45" transform="translate(1.2 2.4) rotate(-120 100 100)"/><polygon id="tN" points="100,21 101.6,100 101.2,114 98.8,114 98.4,100" fill="#eef1f3" transform="rotate(-120 100 100)"/><circle cx="100" cy="100" r="6.5" fill="url(#g-hub)" stroke="#0a0b0c" stroke-width=".7"/><circle cx="100" cy="100" r="2.1" fill="#1f2326"/><path d="M20 96A80 80 0 0 1 180 96Q100 72 20 96Z" fill="url(#g-glass)"/></svg><figcaption data-t="dialTemp"></figcaption></figure>
+      </div>
+
+      <dl class="hw">
+        <dt data-t="cpuName"></dt><dd id="hwSoc">–</dd>
+        <dt>GPU</dt><dd id="hwGpu">–</dd>
+        <dt data-t="driver"></dt><dd id="hwDrv">–</dd>
+      </dl>
+
+      <table class="readouts">
+        <tbody>
+          <tr>
+            <th scope="row" data-t="rowCpu"></th>
+            <td><svg class="k"><use href="#k-needle"/></svg><span class="n" id="rC">–</span><span class="u">MHz</span><span class="m" id="rCt"></span></td>
+            <td><svg class="k"><use href="#k-needle"/></svg><span class="n n2" id="rTc">–</span><span class="u">°C</span></td>
+          </tr>
+          <tr>
+            <th scope="row">GPU</th>
+            <td><svg class="k k-acc"><use href="#k-arc"/></svg><span class="n" id="rG">–</span><span class="u">MHz</span><span class="m" id="rGt"></span></td>
+            <td><svg class="k"></svg><span class="n n2" id="rTg">–</span><span class="u">°C</span></td>
+          </tr>
+          <tr>
+            <th scope="row" data-t="body"></th>
+            <td><svg class="k"></svg><span class="n dim">–</span></td>
+            <td><svg class="k k-acc"><use href="#k-arc"/></svg><span class="n n2" id="rTb">–</span><span class="u">°C</span></td>
+          </tr>
+          <tr>
+            <th scope="row" data-t="rowLimits"></th>
+            <td><svg class="k k-amb"><use href="#k-cap"/></svg><span class="n dim" id="rCap">–</span><span class="u">MHz</span></td>
+            <td><svg class="k k-amb"><use href="#k-lim"/></svg><span class="n n2" id="rLim">–</span><span class="u">°C</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <ul class="panel">
+        <li><span class="lamp" id="lGame"></span><span class="pl" data-t="ledGame"></span><span class="pv" id="vGame">–</span></li>
+        <li><span class="lamp" id="lScene"></span><span class="pl" data-t="ledScene"></span><span class="pv" id="vScene">–</span></li>
+        <li><span class="lamp" id="lCap"></span><span class="pl" data-t="capOn"></span><span class="pv" id="vCap">–</span></li>
+      </ul>
+    </section>
+
+    <fieldset class="group">
+      <legend data-t="profilePanel"></legend>
+      <div id="sliders"></div>
+      <div class="ctl ctl-flat">
+        <span data-t="sSleep"></span>
+        <output class="vbox"><b id="vSleep">–</b><i></i></output>
+      </div>
+      <p class="note" data-t="lockNote"></p>
+    </fieldset>
+
+    <fieldset class="group">
+      <legend data-t="profile"></legend>
+      <div class="keys">
+        <div class="kgrp" role="radiogroup">
+          <div class="kcell" id="cAlto"><button class="key" id="slotAlto" type="button" role="radio" aria-checked="false" disabled>1</button><span class="kcap" data-t="alto"></span></div>
+          <div class="kcell" id="cMax"><button class="key" id="slotMax" type="button" role="radio" aria-checked="false" disabled>2</button><span class="kcap" data-t="maximo"></span></div>
+        </div>
+        <div class="kgrp">
+          <div class="kcell off" id="cApply">
+            <button class="key" id="btnApply" type="button" data-ta="apply" disabled>
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 10.5 8 14l7.5-8"/></svg>
+            </button>
+            <span class="kcap" data-t="apply"></span>
+          </div>
+          <div class="kcell off" id="cUndo">
+            <button class="key" id="btnUndo" type="button" data-ta="undo" disabled>
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 5.5 4 9l3.5 3.5"/><path d="M4.5 9H12a4 4 0 0 1 0 8H9"/></svg>
+            </button>
+            <span class="kcap" data-t="undo"></span>
+          </div>
+        </div>
+      </div>
+      <div class="pdesc">
+        <div class="pmeta" id="pMeta"></div>
+        <p id="pDesc"></p>
+      </div>
+      <div class="pending" id="pending" hidden>
+        <p data-t="pendingText"></p>
+        <button class="btn warn" id="btnReboot" type="button" data-t="reboot"></button>
+      </div>
+    </fieldset>
+
+    <section class="monitor">
+      <header class="mon-bar">
+        <h2 data-t="monitor"></h2>
+        <div class="mon-key"><span class="band-key"></span><span data-t="ledGame"></span></div>
+      </header>
+      <div class="graphs" id="graphs"></div>
+    </section>
+
+    <div class="xps">
+      <details class="xp">
+        <summary><svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg><span data-t="tips"></span></summary>
+        <div class="xp-body"><ul id="tips"></ul></div>
+      </details>
+      <details class="xp" id="logBox">
+        <summary><svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg><span data-t="log"></span></summary>
+        <div class="xp-body"><pre class="log" id="logText">…</pre></div>
+      </details>
+    </div>
+
+  </div>
+
+  <div class="details">
+    <dl>
+      <dt data-t="activeLevel"></dt><dd id="fLevel">–</dd>
+      <dt data-t="nomount"></dt><dd><span class="lamp sm" id="fNmLamp"></span><span id="fNm">–</span></dd>
+      <dt data-t="powerhal"></dt><dd id="fHal">–</dd>
+      <dt data-t="gameCount"></dt><dd id="fCount">–</dd>
+    </dl>
+  </div>
+
+</main>
+
+<footer class="credits">Mondrian-Game-Boost <span id="ver2">v1.0</span> · by Nanairo8890</footer>
+</div>
+
+<div class="veil" id="veil" hidden><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlgT">
+  <div class="dlg-bar" id="dlgT"></div>
+  <div class="dlg-body"><p id="dlgP"></p>
+    <div class="dlg-btns"><button class="btn" id="dlgNo" type="button" data-t="cancel"></button><button class="btn pri" id="dlgYes" type="button"></button></div></div>
+</div></div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="i18n.js"></script>
+<script>
+(function () {
+  "use strict";
+  var MODDIR = "/data/adb/modules/mondrian_game_boost";
+  var hasKsu = typeof window.ksu !== "undefined";
+  var I18N = window.GB_I18N || { en: {} };
+  var L = I18N.en;
+  var LANG = "en";
+
+  /* The phone's language (status.locale, from system_locales) or, before that arrives, the
+     WebView's; ?lang=xx forces one (for testing). Missing keys fall back to English. */
+  function setLang(tag) {
+    var forced = (location.search.match(/[?&]lang=([\w-]+)/) || [])[1];
+    tag = String(forced || tag || "en").toLowerCase().replace("_", "-");
+    var base = tag.split("-")[0];
+    var code = I18N[base] ? base : "en";
+    if (code === LANG && L !== I18N.en) return false;
+    LANG = code;
+    L = {};
+    var k;
+    for (k in I18N.en) L[k] = I18N.en[k];
+    if (code !== "en") for (k in I18N[code]) L[k] = I18N[code][k];
+    /* never break "51 °C" or "35 %" across lines; French puts a non-breaking space before : ; ? !
+       and inside « » */
+    for (k in L) {
+      L[k] = String(L[k]).replace(/(\d) (°C|%)/g, "$1 $2");
+      if (code === "fr") L[k] = L[k].replace(/ ([:;?!»])/g, " $1").replace(/« /g, "« ");
+    }
+    document.documentElement.lang = code;
+    return true;
+  }
+  function fmt(s, level) { return String(s).replace("{level}", levelName(level)); }
+  function levelName(l) { return l === "maximo" ? L.maximo : L.alto; }
+  function sep() { return LANG === "zh" ? "" : " "; } /* Chinese joins sentences without spaces */
+  function colon() { return LANG === "zh" ? "：" : LANG === "fr" ? " : " : ": "; }
+
+  var TIPS = ["tip_games", "tip_cooler", "tip_winlator", "tip_long", "tip_monitor"];
+  var HAL_KEYS = { ok: "hal_ok", late: "hal_late", pending: "hal_pending", restarted: "hal_restarted",
+    "no-overlay": "hal_nooverlay", "bad-label": "hal_badlabel", skip: "hal_skip",
+    "healed-post-mount": "hal_healed", "healed-service": "hal_healed", "": "hal_none" };
+  var STATE_KEYS = { active: "st_active", reboot: "st_reboot", mismatch: "st_mismatch", error: "st_error",
+    "no-nomount": "st_no_nomount", "nomount-disabled": "st_nomount_disabled", "nomount-safe": "st_nomount_safe",
+    "nomount-noinject": "st_nomount_noinject", "bad-label": "st_bad_label", healed: "st_healed",
+    notran: "st_notran", noconfig: "st_noconfig" };
+  /* Marketing names of the SoC model (ro.soc.model) */
+  var SOCS = { SM8475: "Snapdragon 8+ Gen 1", SM8450: "Snapdragon 8 Gen 1", SM8550: "Snapdragon 8 Gen 2", SM8650: "Snapdragon 8 Gen 3" };
+
+  /* What each level asks for while a game is on top (gen_powerhint.py: GAME_ALTO, GAME_MAX) and
+     what the ROM leaves outside games (the white mark). thermal: body temperature below which the
+     Xiaomi thermal scene puts no CPU cap (normal 25, tgame 45, nolimits 51); cpu: floor of the X2
+     core in MHz ("top" = its maximum); mem: DDR floor in MHz */
+  var PROFILES = {
+    alto: { thermal: 45, cpu: 1651, gpu: 580, uclamp: 35, mem: 2092, sleep: true },
+    maximo: { thermal: 51, cpu: "top", gpu: 900, uclamp: 60, mem: 3196, sleep: false }
+  };
+  var ROM = { thermal: 25, cpu: 0, gpu: 220, uclamp: 0, mem: 547 };
+  var SLIDERS = [
+    { k: "thermal", t: "sThermal", unit: "°C", min: 20, max: 60 },
+    { k: "cpu", t: "sCpu", unit: "MHz", min: 0, max: "cpuTop" },
+    { k: "gpu", t: "sGpu", unit: "MHz", min: 0, max: "gpuTop" },
+    { k: "uclamp", t: "sUclamp", unit: "%", min: 0, max: 100 },
+    { k: "mem", t: "sMem", unit: "MHz", min: 0, max: 3196 }
+  ];
+  var SCENE_LIMIT = { 0: 25, 13: 45, 10: 51 };
+
+  function $(id) { return document.getElementById(id); }
+  /* Writes only what changed: every write makes the WebView repaint */
+  function txt(el, s) { if (typeof el === "string") el = $(el); s = String(s); if (el.textContent !== s) el.textContent = s; }
+  function att(el, k, v) { if (typeof el === "string") el = $(el); v = String(v); if (el.getAttribute(k) !== v) el.setAttribute(k, v); }
+  function cls(el, c) { if (typeof el === "string") el = $(el); if (el.className !== c) el.className = c; }
+  /* compares with what it wrote last, not with innerHTML: the browser serializes a non-breaking
+     space as &nbsp; and ">" as &gt;, so that comparison never matches */
+  function html(el, s) { if (typeof el === "string") el = $(el); if (el._gbHtml !== s) { el._gbHtml = s; el.innerHTML = s; } }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function clamp01(f) { return f > 1 ? 1 : f > 0 ? f : 0; }
+
+  /* ----- root commands -----
+     Everything goes through ksu.exec, one short command at a time. ksu.spawn would let the page run
+     on while a command works, but BakaSU's manager crashes when a spawned command prints or ends
+     after its WebUI closed (its bridge reaches the WebView through state.webView!!, null by then),
+     and a page can close at any moment. exec has no such late callback: the manager runs the
+     command on its JavaBridge thread (never the app's main thread) and the page waits for it. The
+     commands take about 0.1 s; a level change, about 2 s. Without ksu (the demo) it answers itself. */
+  var cbN = 0;
+  function exec(cmd) {
+    return new Promise(function (resolve) {
+      if (!hasKsu) { resolve({ errno: 0, stdout: demoExec(cmd), stderr: "" }); return; }
+      var name = "gb_cb_" + Date.now() + "_" + (cbN++), done = false;
+      /* a callback that never comes must not freeze the page */
+      var timer = setTimeout(function () {
+        if (done) return; done = true;
+        window[name] = function () { delete window[name]; };
+        resolve({ errno: -1, stdout: "", stderr: "timeout" });
+      }, 15000);
+      window[name] = function (errno, stdout, stderr) {
+        delete window[name];
+        if (done) return; done = true; clearTimeout(timer);
+        resolve({ errno: errno, stdout: stdout, stderr: stderr });
+      };
+      try { window.ksu.exec(cmd, "{}", name); }
+      catch (e) { delete window[name]; done = true; clearTimeout(timer); resolve({ errno: 1, stdout: "", stderr: String(e) }); }
+    });
+  }
+  /* One webui.sh call that prints one JSON object (status, level, log) */
+  function run(args) {
+    return exec("sh " + MODDIR + "/webui.sh " + args.join(" ")).then(function (r) {
+      try { return JSON.parse(r.stdout); } catch (e) { return null; }
+    });
+  }
+  function toast(msg) {
+    if (hasKsu && window.ksu.toast) { try { window.ksu.toast(msg); return; } catch (e) {} }
+    var t = $("toast"); t.textContent = msg; t.hidden = false;
+    clearTimeout(toast.t); toast.t = setTimeout(function () { t.hidden = true; }, 2200);
+  }
+
+  /* The monitor: one "webui.sh live" every 1.5 s while the page is visible */
+  var pollTimer = null, liveBusy = false;
+  function startMonitor() { if (!pollTimer) { tick(); pollTimer = setInterval(tick, 1500); } }
+  function tick() {
+    if (liveBusy || document.hidden) return;
+    liveBusy = true;
+    run(["live"]).then(function (d) { liveBusy = false; onLive(d); });
+  }
+
+  /* ----- text ----- */
+  function applyText() {
+    var nodes = document.querySelectorAll("[data-t]"), i, k;
+    for (i = 0; i < nodes.length; i++) { k = nodes[i].getAttribute("data-t"); if (L[k]) txt(nodes[i], L[k]); }
+    nodes = document.querySelectorAll("[data-ta]");
+    for (i = 0; i < nodes.length; i++) { k = nodes[i].getAttribute("data-ta"); if (L[k]) att(nodes[i], "aria-label", L[k]); }
+    txt("demo", L.demo);
+    renderTips();
+    if (st) showStatus(st);
+    renderProfile();
+    renderTimeAxis();
+    if (lastLive) render(lastLive);
+    drawGraphs();
+  }
+
+  /* ----- status ----- */
+  var st = null;
+  function showStatus(s) {
+    if (!s) return;
+    var was = saved();
+    st = s;
+    if (s.locale && setLang(s.locale)) { applyText(); return; }
+    var v = s.version || "v1.0";
+    txt("ver", v); txt("ver2", v);
+    var bad = s.code === "healed" || s.code === "bad-label" || s.code === "error";
+    /* turned off in the manager (not by the module's own healing, which says so itself): the boost
+       may still run this boot, but nothing will after a restart */
+    var off = !!s.disabled && s.code !== "healed";
+    cls("stLamp", "lamp " + (s.ok && !off ? "on" : bad ? "bad" : "warn"));
+    txt("stTitle", s.ok ? L.active : bad ? L.error : L.inactive);
+    /* the long text only when it says more than the readout and the level */
+    var notes = [];
+    if (off) notes.push(L.note_disabled);
+    if (!s.ok) notes.push(fmt(L[STATE_KEYS[s.code]] || s.code || "", s.active));
+    else {
+      if (s.late) notes.push(L.note_late);
+      if (s.level !== s.active && !off) notes.push(fmt(L.note_pending, s.level));
+      if (s.thermalProfiles) notes.push(L.note_thermal);
+    }
+    $("stText").hidden = !notes.length;
+    txt("stText", notes.join(sep()));
+    var nmOff = s.code === "nomount-disabled" || s.code === "nomount-safe";
+    txt("fLevel", s.active === "maximo" || s.active === "alto" ? levelName(s.active) : L.none);
+    txt("fNm", !s.metamodule ? L.missing : nmOff ? L.off : /nomount$/.test(s.metamodule) ? L.on : s.metamodule.split("/").pop());
+    cls("fNmLamp", "lamp sm" + (!s.metamodule || nmOff ? " warn" : /nomount$/.test(s.metamodule) ? " on" : ""));
+    txt("fHal", s.code === "noconfig" && s.hal === "ok" ? L.hal_pending : (L[HAL_KEYS[s.hal]] || s.hal));
+    txt("fCount", s.gameCount === null || s.gameCount === undefined ? L.none : String(s.gameCount));
+    showHw(s);
+    $("pending").hidden = off || !((s.active === "alto" || s.active === "maximo") && s.level !== s.active);
+    /* a level changed elsewhere (the Action button) moves the preview with it */
+    if (!preview || preview === was) preview = saved();
+    renderProfile();
+    renderTips();
+  }
+  function saved() { return st ? (st.level === "maximo" ? "maximo" : "alto") : null; }
+  function showHw(s) {
+    var soc = String(s.soc || ""), name = SOCS[soc];
+    txt("hwSoc", soc ? (name ? name + " (" + soc + ")" : soc) : "–");
+    var g = String(s.gpuModel || ""), m = g.match(/^Adreno\s*(\d+)\s*(v\d+)?$/i);
+    txt("hwGpu", g ? (m ? "Adreno " + m[1] + (m[2] ? " " + m[2].toLowerCase() : "") : g) : "–");
+    txt("hwDrv", s.driver || "–");
+  }
+  function renderTips() {
+    var h = "";
+    if (st && st.thermalProfiles) h += '<li class="alert">' + L.tip_thermal + "</li>";
+    TIPS.forEach(function (k) { h += "<li>" + L[k] + "</li>"; });
+    html("tips", h);
+  }
+
+  /* ----- profile: keys 1 and 2 preview a level on the sliders, Apply saves it ----- */
+  var preview = null;
+  function buildSliders() {
+    $("sliders").innerHTML = SLIDERS.map(function (s) {
+      return '<div class="ctl"><div class="ctl-head"><span data-t="' + s.t + '"></span><span class="rom">ROM ' + ROM[s.k] + "</span></div>" +
+        '<div class="ctl-row"><div class="slider" id="sl_' + s.k + '" role="meter" aria-valuemin="' + s.min + '">' +
+        '<span class="trk-s"></span><span class="fil"></span><span class="romk"></span><span class="thm"></span></div>' +
+        '<output class="vbox"><b id="sv_' + s.k + '">–</b><i>' + s.unit + "</i></output></div></div>";
+    }).join("");
+  }
+  function topOf(s) {
+    if (s.max === "cpuTop") return lastLive && lastLive.cpuTop && lastLive.cpuTop[2] > 0 ? Math.round(lastLive.cpuTop[2] / 1000) : null;
+    if (s.max === "gpuTop") return lastLive && lastLive.gpuTop > 0 ? Math.round(lastLive.gpuTop / 1e6) : 900;
+    return s.max;
+  }
+  function renderProfile() {
+    var sv = saved(), lv = preview || "alto", P = PROFILES[lv], dirty = !!sv && lv !== sv;
+    $("slotAlto").disabled = $("slotMax").disabled = !st;
+    att("slotAlto", "aria-checked", lv === "alto" && !!st);
+    att("slotMax", "aria-checked", lv === "maximo" && !!st);
+    cls("cAlto", "kcell" + (lv === "alto" && st ? " sel" : ""));
+    cls("cMax", "kcell" + (lv === "maximo" && st ? " sel" : ""));
+    SLIDERS.forEach(function (s) {
+      var top = topOf(s), v = P[s.k], span = (top || 3187) - s.min;
+      var shown = v === "top" ? top : v, f = v === "top" ? 1 : (v - s.min) / span;
+      var el = $("sl_" + s.k);
+      el.style.setProperty("--v", clamp01(f).toFixed(4));
+      el.style.setProperty("--r", clamp01((ROM[s.k] - s.min) / span).toFixed(4));
+      att(el, "aria-valuemax", top || 3187);
+      att(el, "aria-valuenow", shown === null ? "" : shown);
+      txt("sv_" + s.k, shown === null ? L.topVal : shown);
+    });
+    txt("vSleep", P.sleep ? L.auto : L.off);
+    txt("pMeta", sv ? fmt(L.slot, lv).replace("{n}", lv === "maximo" ? 2 : 1) + " · " + (dirty ? L.previewTag : L.savedTag) : "");
+    var d = "<b>" + esc(levelName(lv) + colon().replace(/ $/, "")) + "</b> " + esc(lv === "maximo" ? L.maxDesc : L.altoDesc);
+    html("pDesc", d);
+    $("btnApply").disabled = !dirty; cls("cApply", "kcell" + (dirty ? "" : " off"));
+    $("btnUndo").disabled = !dirty; cls("cUndo", "kcell" + (dirty ? "" : " off"));
+  }
+
+  /* ----- gauges ----- */
+  var FMAX = 3200, T_LO = 20, T_HI = 100;
+  function ang(f) { return 150 + 240 * clamp01(f); }
+  function polar(r, a) { var t = a * Math.PI / 180; return [100 + r * Math.cos(t), 100 + r * Math.sin(t)]; }
+  function p2(p) { return (Math.round(p[0] * 100) / 100) + " " + (Math.round(p[1] * 100) / 100); }
+  function arcD(r, a0, a1) {
+    if (!(a1 - a0 > 0.2)) return "";
+    return "M" + p2(polar(r, a0)) + "A" + r + " " + r + " 0 " + (a1 - a0 > 180 ? 1 : 0) + " 1 " + p2(polar(r, a1));
+  }
+  function radial(r0, r1, a) { return "M" + p2(polar(r0, a)) + "L" + p2(polar(r1, a)); }
+  function needle(id, f) {
+    var r = (240 * clamp01(f) - 120).toFixed(1);
+    att(id, "transform", "rotate(" + r + " 100 100)");
+    att(id + "s", "transform", "translate(1.2 2.4) rotate(" + r + " 100 100)");
+  }
+  function show(id, on) { att(id, "visibility", on ? "visible" : "hidden"); }
+
+  /* ----- live ----- */
+  var lastLive = null;
+  function deg(v, kind) {
+    if (typeof v !== "number" || !isFinite(v)) return null;
+    if (kind === "board") return v > 1000 ? v / 1000 : v > 200 ? v / 10 : v;
+    return v / 10; /* tenths of a degree */
+  }
+  function onLive(d) {
+    if (!d || !d.cpu || !d.cpuTop || !d.cpuCap) return;
+    lastLive = d;
+    record(d);
+    if (document.hidden) return; /* draw nothing while nobody looks */
+    render(d);
+    drawGraphs();
+  }
+  function render(d) {
+    var cur = d.cpu[2], top = d.cpuTop[2], cap = d.cpuCap[2], capped = cap > 0 && top > 0 && cap < top;
+    var g = d.gpu, gt = d.gpuTop > 0 ? d.gpuTop : 0;
+    /* clock gauge: X2 core on the needle, GPU on the inner arc, both on the same MHz scale */
+    needle("cN", cur > 0 ? cur / 1000 / FMAX : 0);
+    txt("cVal", cur > 0 ? Math.round(cur / 1000) : "–");
+    var gTop = gt ? gt / 1e6 / FMAX : 900 / FMAX;
+    att("cTrk", "d", arcD(40, 150, ang(gTop)));
+    att("cArc", "d", g > 0 ? arcD(40, 150, ang(Math.min(g / 1e6 / FMAX, gTop))) : "");
+    att("cGmax", "d", radial(36.2, 43.8, ang(gTop)));
+    if (capped) {
+      var a = ang(cap / 1000 / FMAX);
+      att("cCap", "d", "M" + p2(polar(82.4, a)) + "L" + p2(polar(87.6, a - 3.3)) + "L" + p2(polar(87.6, a + 3.3)) + "Z");
+    }
+    show("cCap", capped);
+    /* temperature gauge: CPU on the needle, body on the inner arc, the level's limit in amber */
+    var tc = deg(d.tCpu), tg = deg(d.tGpu), tb = deg(d.tBoard, "board"), lim = SCENE_LIMIT[d.scene];
+    needle("tN", tc === null ? 0 : (tc - T_LO) / (T_HI - T_LO));
+    txt("tVal", tc === null ? "–" : Math.round(tc));
+    att("tArc", "d", tb === null ? "" : arcD(40, 150, ang((tb - T_LO) / (T_HI - T_LO))));
+    if (lim) att("tLim", "d", radial(35, 45, ang((lim - T_LO) / (T_HI - T_LO))));
+    show("tLim", !!lim);
+    att("gC", "aria-label", L.dialClock + colon() + "CPU " + (cur > 0 ? Math.round(cur / 1000) : "–") + " MHz, GPU " + (g > 0 ? Math.round(g / 1e6) : "–") + " MHz");
+    att("gT", "aria-label", L.dialTemp + colon() + "CPU " + (tc === null ? "–" : Math.round(tc)) + " °C, " + L.body + " " + (tb === null ? "–" : Math.round(tb)) + " °C");
+    /* readouts */
+    txt("rC", cur > 0 ? Math.round(cur / 1000) : "–");
+    txt("rCt", top > 0 ? "/ " + Math.round(top / 1000) : "");
+    txt("rG", g > 0 ? Math.round(g / 1e6) : "–");
+    txt("rGt", gt ? "/ " + Math.round(gt / 1e6) : "");
+    txt("rTc", tc === null ? "–" : Math.round(tc));
+    txt("rTg", tg === null ? "–" : Math.round(tg));
+    txt("rTb", tb === null ? "–" : Math.round(tb));
+    txt("rCap", capped ? Math.round(cap / 1000) : "–");
+    cls("rCap", "n" + (capped ? " hot" : " dim"));
+    txt("rLim", lim || "–");
+    /* front panel lamps */
+    cls("lGame", "lamp" + (d.game ? " on" : ""));
+    txt("vGame", d.game ? L.onState : L.offState);
+    cls("lScene", "lamp" + (d.scene === 13 ? " on" : d.scene === 10 ? " warn" : ""));
+    txt("vScene", d.scene === null || d.scene === undefined ? L.none : L["sc" + d.scene] || String(d.scene));
+    var names = ["A510", "A710", "X2"], caps = [];
+    for (var i = 2; i >= 0; i--) if (d.cpuCap[i] > 0 && d.cpuTop[i] > 0 && d.cpuCap[i] < d.cpuTop[i]) caps.push(names[i] + " " + Math.round(d.cpuCap[i] / 1000));
+    if (d.gpuCap > 0 && gt && d.gpuCap < gt) caps.push("GPU " + Math.round(d.gpuCap / 1e6));
+    cls("lCap", "lamp" + (caps.length ? " warn" : ""));
+    txt("vCap", caps.length ? caps.join(" · ") : L.capNoneS);
+    if (st) renderProfile(); /* the CPU top for the slider */
+  }
+
+  /* ----- hardware monitor: the last 4 minutes, a sample every 1.5 s ----- */
+  var HIST = 160, hist = [], sampleN = 0, prevStat = null, lastT = 0, memTotal = null;
+  var GRAPHS = [
+    { id: "gpuUse", t: "m_gpuUse", lo: 0, hi: 100, fix: true, s: [{ k: "gpuBusy", c: "ln" }] },
+    { id: "gpuClk", t: "m_gpuClk", lo: 0, hi: "gpuTop", fix: true, s: [{ k: "gpuMhz", c: "ln" }] },
+    { id: "cpuUse", t: "m_cpuUse", lo: 0, hi: 100, fix: true, opt: true, s: [{ k: "cpuUse", c: "ln" }] },
+    { id: "cpuClk", t: "m_cpuClk", lo: 0, hi: "cpuTop", fix: true, lim: "cap",
+      s: [{ k: "c2", c: "ln", n: "X2" }, { k: "c1", c: "ln-2", n: "A710" }, { k: "c0", c: "ln-3", n: "A510" }] },
+    { id: "cpuTemp", t: "m_cpuTemp", lo: 30, hi: 60, dec: 1, s: [{ k: "tCpu", c: "ln" }] },
+    { id: "skin", t: "m_skin", lo: 30, hi: 55, dec: 1, lim: "thermal", s: [{ k: "tBoard", c: "ln", n: "body" }, { k: "tBatt", c: "ln-2", n: "battery" }] },
+    { id: "ram", t: "m_ram", lo: 0, hi: "memTotal", fix: true, opt: true, dec: 1, s: [{ k: "ram", c: "ln" }] },
+    { id: "power", t: "m_power", lo: 0, hi: 8, opt: true, dec: 1, s: [{ k: "watts", c: "ln" }] }
+  ];
+  var CLS = { ln: "c1", "ln-2": "c2", "ln-3": "c3" };
+  function buildGraphs() {
+    $("graphs").innerHTML = GRAPHS.map(function (g) {
+      return '<div class="graph" id="g_' + g.id + '"' + (g.opt ? " hidden" : "") + '><div class="g-head"><div><div class="g-title" data-t="' + g.t + '"></div>' +
+        '<div class="' + (g.s.length > 1 ? "g-leg" : "g-sub") + '"></div></div><div class="g-now"></div></div>' +
+        '<div class="g-body"><div class="g-axis"><span class="ax-hi"></span><span class="lim-l" hidden></span><span class="ax-lo"></span></div>' +
+        '<div class="plot"><span class="lim" hidden></span><svg viewBox="0 0 240 100" preserveAspectRatio="none" aria-hidden="true">' +
+        '<path class="bands"/><path class="edges"/>' + g.s.slice().reverse().map(function (se) { return '<path class="' + se.c + '"/>'; }).join("") +
+        "</svg></div></div></div>";
+    }).join("") + '<div class="t-axis" id="tAxis" aria-hidden="true"></div>';
+    GRAPHS.forEach(function (g) {
+      var el = $("g_" + g.id);
+      g.el = el; g.sub = el.querySelector(".g-sub, .g-leg"); g.now = el.querySelector(".g-now");
+      g.hiL = el.querySelector(".ax-hi"); g.loL = el.querySelector(".ax-lo"); g.limL = el.querySelector(".lim-l"); g.limLine = el.querySelector(".lim");
+      var paths = el.querySelectorAll("path");
+      g.bands = paths[0]; g.edges = paths[1];
+      g.lines = Array.prototype.slice.call(paths, 2).reverse(); /* same order as g.s */
+    });
+  }
+  function renderTimeAxis() {
+    var h = '<span style="left:0">−4 min</span><span style="left:25%">−3</span><span style="left:50%">−2</span><span style="left:75%">−1</span><span style="left:100%">' + esc(L.nowT) + "</span>";
+    html("tAxis", h);
+  }
+  function num(v) { return typeof v === "number" && isFinite(v) ? v : null; }
+  function record(d) {
+    var now = Date.now();
+    /* the page was hidden: break the lines, and do not average the CPU over the gap */
+    if (lastT && now - lastT > 6000) { push({ gap: true }); prevStat = null; }
+    lastT = now;
+    var s = { n: ++sampleN, game: !!d.game };
+    s.c0 = d.cpu[0] > 0 ? d.cpu[0] / 1000 : null;
+    s.c1 = d.cpu[1] > 0 ? d.cpu[1] / 1000 : null;
+    s.c2 = d.cpu[2] > 0 ? d.cpu[2] / 1000 : null;
+    s.gpuMhz = d.gpu > 0 ? d.gpu / 1e6 : null;
+    s.gpuBusy = d.gpuBusy >= 0 && d.gpuBusy <= 100 ? d.gpuBusy : null;
+    s.tCpu = deg(d.tCpu); s.tBatt = deg(d.tBatt); s.tBoard = deg(d.tBoard, "board");
+    /* /proc/stat: user nice system idle iowait irq softirq steal */
+    if (d.stat && d.stat.length >= 8) {
+      var tot = 0, i;
+      for (i = 0; i < 8; i++) tot += +d.stat[i] || 0;
+      var idle = (+d.stat[3] || 0) + (+d.stat[4] || 0);
+      if (prevStat && tot > prevStat.tot) s.cpuUse = Math.max(0, Math.min(100, 100 * (1 - (idle - prevStat.idle) / (tot - prevStat.tot))));
+      prevStat = { tot: tot, idle: idle };
+    }
+    /* /proc/meminfo in kB: MemTotal, MemAvailable (-1 when missing) */
+    if (d.mem && d.mem[0] > 0 && d.mem[1] >= 0) { memTotal = d.mem[0] / 1048576; s.ram = (d.mem[0] - d.mem[1]) / 1048576; }
+    /* battery current (µA on this phone; the sign depends on the driver) times voltage (µV); a
+       driver in mA/mV would report a voltage under 100000 */
+    var bi = num(d.bI), bv = num(d.bV);
+    if (bi !== null && bv !== null && bv > 0) {
+      bi = Math.abs(bi);
+      if (bv < 100000) { bv *= 1000; bi *= 1000; }
+      s.watts = bi * bv / 1e12;
+    }
+    s.chg = !!d.chg;
+    push(s);
+  }
+  function push(s) { hist.push(s); if (hist.length > HIST) hist.splice(0, hist.length - HIST); }
+  function rangeOf(g) {
+    var lo = g.lo, hi = g.hi;
+    if (hi === "gpuTop") hi = lastLive && lastLive.gpuTop > 0 ? Math.round(lastLive.gpuTop / 1e6) : 900;
+    else if (hi === "cpuTop") hi = lastLive && lastLive.cpuTop && lastLive.cpuTop[2] > 0 ? Math.ceil(lastLive.cpuTop[2] / 100000) * 100 : 3200;
+    else if (hi === "memTotal") hi = memTotal ? Math.ceil(memTotal) : 12;
+    if (!g.fix) {
+      var mn = Infinity, mx = -Infinity;
+      hist.forEach(function (s) { g.s.forEach(function (se) { var v = s[se.k]; if (typeof v === "number") { if (v < mn) mn = v; if (v > mx) mx = v; } }); });
+      if (mn < lo) lo = Math.floor(mn / 5) * 5;
+      if (mx > hi) hi = Math.ceil(mx / 5) * 5;
+    }
+    return [lo, hi];
+  }
+  function fv(v, g) { return v === null || v === undefined ? "–" : v.toFixed(g.dec || 0); }
+  function r1(n) { return Math.round(n * 10) / 10; }
+  function drawGraph(g) {
+    var has = hist.some(function (s) { return g.s.some(function (se) { return typeof s[se.k] === "number"; }); });
+    if (g.opt) g.el.hidden = !has;
+    if (g.el.hidden) return;
+    var rg = rangeOf(g), lo = rg[0], hi = rg[1], span = hi - lo || 1;
+    var len = hist.length, step = 240 / (HIST - 1), x0 = 240 - (len - 1) * step, i;
+    function y(v) { var f = (v - lo) / span; return r1(100 - (f < 0 ? 0 : f > 1 ? 1 : f) * 98 - 1); }
+    /* game mode bands */
+    var bd = "", ed = "", start = -1;
+    for (i = 0; i <= len; i++) {
+      var on = i < len && hist[i].game;
+      if (on && start < 0) start = i;
+      if (!on && start >= 0) {
+        var xa = r1(Math.max(0, x0 + start * step - step / 2)), xb = r1(Math.min(240, x0 + (i - 1) * step + step / 2));
+        bd += "M" + xa + " 0H" + xb + "V100H" + xa + "Z"; ed += "M" + xa + " 0V100";
+        start = -1;
+      }
+    }
+    att(g.bands, "d", bd); att(g.edges, "d", ed);
+    g.s.forEach(function (se, si) {
+      var dd = "", pen = false;
+      for (i = 0; i < len; i++) {
+        var v = hist[i][se.k];
+        if (typeof v === "number") { dd += (pen ? "L" : "M") + r1(x0 + i * step) + " " + y(v); pen = true; } else pen = false;
+      }
+      att(g.lines[si], "d", dd);
+    });
+    txt(g.hiL, Math.round(hi)); txt(g.loL, Math.round(lo));
+    /* amber line: the X2 core's cap now, or the running level's body limit */
+    var limV = null;
+    if (g.lim === "cap" && lastLive) { var c = lastLive.cpuCap[2], t = lastLive.cpuTop[2]; if (c > 0 && t > 0 && c < t) limV = Math.round(c / 1000); }
+    if (g.lim === "thermal" && lastLive) limV = SCENE_LIMIT[lastLive.scene] || null;
+    var limOn = limV !== null && limV > lo && limV < hi, pos = limOn ? (hi - limV) / span * 100 : 50;
+    g.limL.hidden = g.limLine.hidden = !limOn;
+    if (limOn) {
+      var top = r1(pos) + "%";
+      if (g.limLine.style.top !== top) { g.limLine.style.top = top; g.limL.style.top = top; }
+      txt(g.limL, limV);
+    }
+    /* the amber label takes the place of an axis label it would print over (10 px of the 58) */
+    g.hiL.style.visibility = pos < 18 ? "hidden" : "";
+    g.loL.style.visibility = pos > 82 ? "hidden" : "";
+    /* texts: min and max of the line (or each line's value), and the latest value */
+    var last = null;
+    for (i = len - 1; i >= 0 && !last; i--) if (!hist[i].gap) last = hist[i];
+    if (g.s.length > 1) {
+      var lg = g.s.map(function (se) {
+        return '<span><i class="sw ' + CLS[se.c] + '"></i>' + esc(L[se.n] || se.n) + " <b>" + fv(last ? num(last[se.k]) : null, g) + "</b></span>";
+      }).join("");
+      html(g.sub, lg);
+    } else {
+      var k = g.s[0].k, mn = Infinity, mx = -Infinity;
+      hist.forEach(function (s) { var v = s[k]; if (typeof v === "number") { if (v < mn) mn = v; if (v > mx) mx = v; } });
+      txt(g.sub, mx === -Infinity ? "" : L.gMin + " " + fv(mn, g) + " · " + L.gMax + " " + fv(mx, g));
+      var cur = last ? num(last[k]) : null;
+      var nw = esc(fv(cur, g)) + (g.id === "power" && last && last.chg && cur !== null ? "<small>" + esc(L.charging) + "</small>" : "");
+      html(g.now, nw);
+    }
+  }
+  function drawGraphs() { GRAPHS.forEach(drawGraph); }
+
+  /* ----- dialogs and actions ----- */
+  function ask(title, text, yes, cls2) {
+    return new Promise(function (resolve) {
+      txt("dlgT", title); txt("dlgP", text); txt("dlgYes", yes);
+      $("dlgYes").className = "btn " + (cls2 || "pri");
+      $("veil").hidden = false;
+      function done(v) { $("veil").hidden = true; $("dlgYes").onclick = $("dlgNo").onclick = null; resolve(v); }
+      $("dlgYes").onclick = function () { done(true); };
+      $("dlgNo").onclick = function () { done(false); };
+    });
+  }
+  function choose(level) { if (!st) return; preview = level; renderProfile(); }
+  $("slotAlto").onclick = function () { choose("alto"); };
+  $("slotMax").onclick = function () { choose("maximo"); };
+  $("btnUndo").onclick = function () { preview = saved(); renderProfile(); };
+  var applying = false;
+  $("btnApply").onclick = function () {
+    var level = preview;
+    if (!st || !level || applying) return;
+    if (st.level === level) { toast(L.same); return; }
+    ask(L.dlgLevelT, level === "maximo" ? L.dlgMaxP : L.dlgAltoP, L.yesLevel, level === "maximo" ? "warn" : "pri").then(function (yes) {
+      if (!yes) return;
+      applying = true;
+      /* the power HAL restarts (about 2 s, the page waits): say so and let it paint first */
+      txt("pMeta", L.applying);
+      $("btnApply").disabled = $("btnUndo").disabled = $("slotAlto").disabled = $("slotMax").disabled = true;
+      setTimeout(function () {
+        run(["level", level]).then(function (s) {
+          applying = false;
+          if (s && s.level === level) { showStatus(s); toast(s.active === level ? L.levelApplied : L.levelSaved); }
+          else { renderProfile(); toast(L.error); }
+        });
+      }, 80);
+    });
+  };
+  $("btnReboot").onclick = function () {
+    ask(L.dlgRebootT, L.dlgRebootP, L.yesReboot, "warn").then(function (yes) { if (yes) run(["reboot"]); });
+  };
+  $("logBox").addEventListener("toggle", function () {
+    if (!$("logBox").open) return;
+    run(["log"]).then(function (s) { txt("logText", typeof s === "string" && s.trim() ? s : "–"); });
+  });
+
+  /* ----- demo data (a normal browser has no ksu bridge) ----- */
+  var demoLevel = "alto", demoActive = "alto", demoStat = [912345, 2345, 456789, 8123456, 12345, 23456, 11234, 0];
+  function demoExec(cmd) {
+    var t = Date.now() / 1000, game = Math.floor(t / 20) % 2 === 0, w = function (a, b) { return a + (Math.sin(t * b) + 1) / 2; };
+    if (/ live$/.test(cmd)) {
+      var busy = game ? 0.55 + 0.2 * Math.sin(t * 0.6) : 0.08 + 0.04 * Math.sin(t);
+      demoStat[0] += Math.round(1200 * busy * 0.7); demoStat[2] += Math.round(1200 * busy * 0.3); demoStat[3] += Math.round(1200 * (1 - busy));
+      return JSON.stringify({ cpu: [game ? 1804800 : 1132800, Math.round(game ? w(1900000, 1.3) + 400000 : 940800), Math.round(game ? w(2400000, 0.9) + 500000 : 1036800)],
+        cpuCap: [2016000, game ? 2745600 : 2572800, game ? 3187200 : 2246400], cpuTop: [2016000, 2745600, 3187200],
+        gpu: game ? Math.round(w(580, 0.7) * 1e6 + 200e6) : 220e6, gpuTop: 900e6, gpuCap: 900e6, gpuBusy: game ? Math.round(w(70, 1.1) + 18) : 6,
+        tCpu: game ? Math.round(w(470, 0.2) + 20) : 365, tGpu: game ? Math.round(w(440, 0.25) + 20) : 352, tBatt: game ? 384 : 331, tBoard: game ? Math.round(41000 + 2500 * Math.sin(t / 9)) : 34200,
+        scene: game ? (demoLevel === "maximo" ? 10 : 13) : 0, game: game,
+        stat: demoStat.slice(), mem: [11634892, Math.round(game ? 4100000 + 300000 * Math.sin(t / 5) : 6900000)],
+        bI: Math.round(game ? 1450000 + 300000 * Math.sin(t * 0.7) : 380000), bV: 4182000, chg: false });
+    }
+    var m = cmd.match(/ level (\w+)$/); if (m) demoLevel = demoActive = m[1];
+    if (/ log$/.test(cmd)) return JSON.stringify("Tue Oct 21 18:00:00 -03 2026\nBoost de juegos activo, nivel alto y estable\nlevel: alto; post-fs-data: alto; power HAL: ok, running\nmetamodule: /data/adb/modules/nomount\nGAME: GAME\t3\t1820450\nsconfig: 0");
+    if (/ reboot$/.test(cmd)) return "";
+    return JSON.stringify({ version: "v1.0", level: demoLevel, active: demoActive, hal: "ok", code: "active", ok: true, late: false,
+      locale: navigator.language || "en", metamodule: "/data/adb/modules/nomount", thermalProfiles: false, gameCount: 3, disabled: false,
+      soc: "SM8475", gpuModel: "Adreno730v3", driver: "V@0615.95" });
+  }
+
+  /* ----- start ----- */
+  /* MODDIR is the manager's modDir for this module (/data/adb/modules/<id>), so no moduleInfo call */
+  if (hasKsu) {
+    try { if (window.ksu.enableEdgeToEdge) window.ksu.enableEdgeToEdge(true); } catch (e) {}
+  } else {
+    $("demo").hidden = false;
+  }
+  setLang(navigator.language);
+  buildSliders(); buildGraphs();
+  applyText();
+  /* paint first */
+  setTimeout(function () {
+    run(["status"]).then(showStatus);
+    startMonitor();
+  }, 60);
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) return;
+    if (lastLive) render(lastLive);
+    drawGraphs();
+    setTimeout(function () { run(["status"]).then(showStatus); tick(); }, 60);
+  });
+})();
+</script>
+</body>
+</html>
